@@ -28,6 +28,8 @@ export default async function handler(req, res) {
       .map(item => {
         const info = item.aweme_info || {};
         const stats = info.statistics || {};
+        const videoUrl = info.video?.play_addr?.url_list?.[0] || 
+                        info.video?.download_addr?.url_list?.[0] || '';
         return {
           author: info.author?.nickname || '',
           username: info.author?.unique_id || '',
@@ -40,35 +42,61 @@ export default async function handler(req, res) {
           saves: stats.collect_count || 0,
           url: info.url || '',
           thumbnail: info.video?.cover?.url_list?.[0] || '',
+          video_url: videoUrl,
         };
       })
       .filter(v => v.views >= 100000 && v.likes >= 2000);
 
-    // Step 3 - Send to AI with detailed prompt (caption based — fast and reliable)
+    // Step 3 - Send to AI with video URL
     const results = [];
-    for (const v of filtered.slice(0, 5)) {
-      const prompt = `You are a content strategist for Hoxton Wealth, a financial planning company specifically serving expats (people living outside their home country).
+    for (const v of filtered.slice(0, 3)) {
+      let aiMessages;
 
-Analyze this TikTok video in detail:
+      if (v.video_url) {
+        // Try sending actual video URL to Gemini
+        aiMessages = [{
+          role: 'user',
+          content: [
+            {
+              type: 'image_url',
+              image_url: { url: v.video_url }
+            },
+            {
+              type: 'text',
+              text: `You are a content strategist for Hoxton Wealth, a financial planning company for expats.
+
+Watch this TikTok video and analyze it:
 Creator: @${v.author}
 Caption: ${v.desc}
 Views: ${v.views.toLocaleString()}
 Likes: ${v.likes.toLocaleString()}
-Comments: ${v.comments.toLocaleString()}
-Shares: ${v.shares.toLocaleString()}
-Saves: ${v.saves.toLocaleString()}
 
 Give a thorough analysis:
-1. SCORE (1-10): How relevant is this for Hoxton Wealth's expat audience?
-2. TOPIC: What specific financial topic does this cover?
-3. AUDIENCE FIT: Does this match expats with complex financial needs? Give detail.
-4. TONE: Is the tone professional enough for Hoxton Wealth? Give detail.
-5. VISUALS: Based on the caption and context, describe what the video likely looks like visually.
-6. CONTENT IDEA: Give a specific, detailed idea for how Hoxton Wealth could create a similar video targeting expats.
-7. SUMMARY: One sentence explaining why this is or isn't useful for Hoxton Wealth.
+1. SCORE (1-10): Relevance for Hoxton Wealth expat audience
+2. TOPIC: What financial topic does this cover?
+3. AUDIENCE FIT: Does this match expats with complex financial needs?
+4. TONE: Is the tone professional enough for Hoxton Wealth?
+5. VISUALS: Describe exactly what you see — background, setting, person, style
+6. CONTENT IDEA: Specific idea for Hoxton Wealth to create a similar expat video
+7. SUMMARY: One sentence summary
 
-Reply ONLY as JSON with no markdown:
-{"score": number, "topic": "string", "audience_fit": "string", "tone": "string", "visuals": "string", "content_idea": "string", "summary": "string"}`;
+Reply ONLY as JSON:
+{"score": number, "topic": "string", "audience_fit": "string", "tone": "string", "visuals": "string", "content_idea": "string", "summary": "string"}`
+            }
+          ]
+        }];
+      } else {
+        // Fallback to caption only
+        aiMessages = [{
+          role: 'user',
+          content: `Analyze this TikTok for Hoxton Wealth (expat financial planning):
+Caption: ${v.desc}
+Views: ${v.views.toLocaleString()}, Likes: ${v.likes.toLocaleString()}
+
+Reply ONLY as JSON:
+{"score": number, "topic": "string", "audience_fit": "string", "tone": "string", "visuals": "Not available - no video URL", "content_idea": "string", "summary": "string"}`
+        }];
+      }
 
       try {
         const aiResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -80,7 +108,7 @@ Reply ONLY as JSON with no markdown:
           body: JSON.stringify({
             model: 'google/gemini-2.5-flash',
             max_tokens: 1000,
-            messages: [{ role: 'user', content: prompt }]
+            messages: aiMessages
           })
         });
 
@@ -96,7 +124,7 @@ Reply ONLY as JSON with no markdown:
           topic: 'Finance',
           audience_fit: 'Could not analyze',
           tone: 'Could not analyze',
-          visuals: 'Not available',
+          visuals: 'Could not analyze',
           content_idea: 'Could not analyze',
           summary: 'Analysis failed'
         });
