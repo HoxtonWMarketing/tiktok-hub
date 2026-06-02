@@ -28,8 +28,6 @@ export default async function handler(req, res) {
       .map(item => {
         const info = item.aweme_info || {};
         const stats = info.statistics || {};
-        const videoUrl = info.video?.play_addr?.url_list?.[0] || 
-                        info.video?.download_addr?.url_list?.[0] || '';
         return {
           author: info.author?.nickname || '',
           username: info.author?.unique_id || '',
@@ -42,60 +40,71 @@ export default async function handler(req, res) {
           saves: stats.collect_count || 0,
           url: info.url || '',
           thumbnail: info.video?.cover?.url_list?.[0] || '',
-          video_url: videoUrl,
         };
       })
       .filter(v => v.views >= 100000 && v.likes >= 2000);
 
-    // Step 3 - Send to AI with video URL
+    // Step 3 - Download and analyze each video
     const results = [];
     for (const v of filtered.slice(0, 3)) {
-      let aiMessages;
+      let videoBase64 = null;
 
-      if (v.video_url) {
-        // Try sending actual video URL to Gemini
-        aiMessages = [{
-          role: 'user',
-          content: [
-            {
-              type: 'image_url',
-              image_url: { url: v.video_url }
-            },
-            {
-              type: 'text',
-              text: `You are a content strategist for Hoxton Wealth, a financial planning company for expats.
+      try {
+        // Try downloading via ytdlp-web serverless API
+        const tiktokUrl = `https://www.tiktok.com/@${v.username}/video/${v.video_id}`;
+        const downloadResp = await fetch(
+          `https://yozora.vercel.app/api/download?url=${encodeURIComponent(tiktokUrl)}&format=mp4`,
+          { signal: AbortSignal.timeout(20000) }
+        );
 
-Watch this TikTok video and analyze it:
+        if (downloadResp.ok) {
+          const videoBuffer = await downloadResp.arrayBuffer();
+          videoBase64 = Buffer.from(videoBuffer).toString('base64');
+        }
+      } catch (e) {
+        console.log('Download failed, using caption only:', e.message);
+      }
+
+      // Build AI message
+      let aiContent;
+      if (videoBase64) {
+        aiContent = [
+          {
+            type: 'image_url',
+            image_url: { url: `data:video/mp4;base64,${videoBase64}` }
+          },
+          {
+            type: 'text',
+            text: `You are a content strategist for Hoxton Wealth, a financial planning company for expats.
+
+Watch this TikTok video carefully and analyze everything you see:
 Creator: @${v.author}
 Caption: ${v.desc}
 Views: ${v.views.toLocaleString()}
 Likes: ${v.likes.toLocaleString()}
 
-Give a thorough analysis:
+Analyze:
 1. SCORE (1-10): Relevance for Hoxton Wealth expat audience
 2. TOPIC: What financial topic does this cover?
 3. AUDIENCE FIT: Does this match expats with complex financial needs?
 4. TONE: Is the tone professional enough for Hoxton Wealth?
-5. VISUALS: Describe exactly what you see — background, setting, person, style
+5. VISUALS: Describe exactly what you SEE — the person, background, setting, clothing, style
 6. CONTENT IDEA: Specific idea for Hoxton Wealth to create a similar expat video
 7. SUMMARY: One sentence summary
 
 Reply ONLY as JSON:
 {"score": number, "topic": "string", "audience_fit": "string", "tone": "string", "visuals": "string", "content_idea": "string", "summary": "string"}`
-            }
-          ]
-        }];
+          }
+        ];
       } else {
-        // Fallback to caption only
-        aiMessages = [{
-          role: 'user',
-          content: `Analyze this TikTok for Hoxton Wealth (expat financial planning):
+        aiContent = `You are a content strategist for Hoxton Wealth, a financial planning company for expats.
+Analyze this TikTok:
+Creator: @${v.author}
 Caption: ${v.desc}
 Views: ${v.views.toLocaleString()}, Likes: ${v.likes.toLocaleString()}
 
 Reply ONLY as JSON:
-{"score": number, "topic": "string", "audience_fit": "string", "tone": "string", "visuals": "Not available - no video URL", "content_idea": "string", "summary": "string"}`
-        }];
+{"score": number, "topic": "string", "audience_fit": "string", "tone": "string", "visuals": "Video could not be downloaded", "content_idea": "string", "summary": "string"}`;
       }
 
       try {
@@ -108,7 +117,7 @@ Reply ONLY as JSON:
           body: JSON.stringify({
             model: 'google/gemini-2.5-flash',
             max_tokens: 1000,
-            messages: aiMessages
+            messages: [{ role: 'user', content: aiContent }]
           })
         });
 
