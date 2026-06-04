@@ -4,128 +4,296 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>TikTok Content Hub – Hoxton Wealth Marketing</title>
-
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: 'Segoe UI', sans-serif; background: #0f0f0f; color: #f0f0f0; min-height: 100vh; }
+
   header { background: #1a1a1a; border-bottom: 1px solid #2a2a2a; padding: 1.2rem 2rem; display: flex; align-items: center; justify-content: space-between; }
   header h1 { font-size: 1.3rem; font-weight: 600; color: #fff; }
   header p { font-size: 0.8rem; color: #888; margin-top: 2px; }
-  .controls { padding: 1.5rem 2rem; display: flex; gap: 1rem; align-items: center; background: #141414; border-bottom: 1px solid #2a2a2a; }
+
+  .controls { padding: 1.2rem 2rem; display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; background: #141414; border-bottom: 1px solid #2a2a2a; }
   .search-box { display: flex; align-items: center; background: #222; border: 1px solid #333; border-radius: 8px; padding: 0.5rem 1rem; gap: 0.5rem; flex: 1; max-width: 400px; }
   .search-box input { background: none; border: none; outline: none; color: #fff; font-size: 0.9rem; width: 100%; }
-  .btn { padding: 0.5rem 1.2rem; border-radius: 8px; border: none; font-size: 0.9rem; cursor: pointer; font-weight: 500; background: #ff2d55; color: #fff; transition: all 0.2s; }
-  .btn:hover { background: #e0233e; }
-  .btn:disabled { background: #555; cursor: not-allowed; }
+
+  .days-box { display: flex; align-items: center; gap: 0.5rem; background: #222; border: 1px solid #333; border-radius: 8px; padding: 0.5rem 1rem; font-size: 0.85rem; color: #aaa; }
+  .days-box select { background: #222; border: none; outline: none; color: #fff; font-size: 0.85rem; cursor: pointer; }
+
+  .btn { padding: 0.5rem 1.2rem; border-radius: 8px; border: none; font-size: 0.9rem; cursor: pointer; font-weight: 500; transition: all 0.2s; }
+  .btn-primary { background: #ff2d55; color: #fff; }
+  .btn-primary:hover { background: #e0233e; }
+  .btn-weekly { background: #1d4ed8; color: #fff; }
+  .btn-weekly:hover { background: #1e40af; }
+  .btn:disabled { background: #555 !important; cursor: not-allowed; }
+
+  .scan-note { font-size: 0.75rem; color: #555; align-self: center; }
+
   .main { padding: 1.5rem 2rem; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1.2rem; }
+  .results-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem; }
+  .results-count { font-size: 0.85rem; color: #666; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1.2rem; }
+
   .card { background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 12px; overflow: hidden; transition: transform 0.2s; }
   .card:hover { transform: translateY(-3px); border-color: #444; }
+
   .card-thumb { width: 100%; height: 180px; background: #222; display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden; }
   .card-thumb img { width: 100%; height: 100%; object-fit: cover; }
+
   .score-badge { position: absolute; top: 10px; right: 10px; padding: 4px 12px; border-radius: 20px; font-size: 0.78rem; font-weight: 700; }
   .score-high { background: #16a34a; color: #fff; }
-  .score-mid { background: #d97706; color: #fff; }
-  .score-low { background: #555; color: #ccc; }
+  .score-mid  { background: #d97706; color: #fff; }
+  .score-low  { background: #555;    color: #ccc; }
+
+  .date-badge { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.7); color: #aaa; font-size: 0.7rem; padding: 3px 8px; border-radius: 20px; }
+
   .card-body { padding: 1rem; }
   .card-author { font-size: 0.75rem; color: #ff2d55; font-weight: 600; margin-bottom: 4px; text-transform: uppercase; }
   .card-title { font-size: 0.88rem; color: #e0e0e0; line-height: 1.4; margin-bottom: 0.8rem; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-  .card-meta { display: flex; gap: 1rem; font-size: 0.78rem; color: #666; margin-bottom: 0.8rem; }
-  .ai-box { background: #111; border-left: 3px solid #ff2d55; padding: 0.5rem 0.7rem; font-size: 0.78rem; color: #aaa; border-radius: 0 4px 4px 0; margin-bottom: 0.5rem; line-height: 1.4; }
-  .ai-box strong { color: #ccc; }
+  .card-meta { display: flex; gap: 1rem; font-size: 0.78rem; color: #666; margin-bottom: 0.8rem; flex-wrap: wrap; }
+
+  .ai-box { background: #111; border-left: 3px solid #ff2d55; padding: 0.5rem 0.7rem; font-size: 0.78rem; color: #aaa; border-radius: 0 4px 4px 0; margin-bottom: 0.5rem; line-height: 1.5; }
+  .ai-box strong { color: #ccc; display: block; margin-bottom: 2px; }
+
+  /* Transcript box — collapsible */
+  .transcript-box { background: #0d0d0d; border: 1px solid #2a2a2a; border-radius: 6px; margin-bottom: 0.5rem; overflow: hidden; }
+  .transcript-toggle { width: 100%; background: none; border: none; color: #888; font-size: 0.78rem; padding: 0.5rem 0.7rem; text-align: left; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
+  .transcript-toggle:hover { color: #ccc; }
+  .transcript-content { display: none; padding: 0.5rem 0.7rem; font-size: 0.75rem; color: #777; line-height: 1.6; border-top: 1px solid #1a1a1a; max-height: 150px; overflow-y: auto; }
+  .transcript-content.open { display: block; }
+
+  /* Draft script box */
+  .script-box { background: #0a1628; border-left: 3px solid #1d4ed8; padding: 0.5rem 0.7rem; font-size: 0.78rem; color: #93c5fd; border-radius: 0 4px 4px 0; margin-bottom: 0.5rem; line-height: 1.5; }
+  .script-box strong { color: #bfdbfe; display: block; margin-bottom: 2px; }
+
   .card-actions { display: flex; gap: 0.5rem; margin-top: 0.8rem; }
-  .card-actions a { flex: 1; padding: 0.4rem; border-radius: 6px; font-size: 0.78rem; text-align: center; text-decoration: none; background: #ff2d55; color: #fff; }
+  .card-actions a { flex: 1; padding: 0.45rem; border-radius: 6px; font-size: 0.78rem; text-align: center; text-decoration: none; background: #ff2d55; color: #fff; font-weight: 500; }
+
   .loading { text-align: center; padding: 4rem; color: #555; }
   .spinner { width: 32px; height: 32px; border: 3px solid #333; border-top-color: #ff2d55; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 1rem; }
   @keyframes spin { to { transform: rotate(360deg); } }
+
   .empty { text-align: center; padding: 4rem; color: #555; }
+  .last-scan { font-size: 0.75rem; color: #444; margin-left: auto; align-self: center; }
 </style>
 </head>
 <body>
+
 <header>
   <div>
     <h1>🎯 TikTok Content Hub</h1>
     <p>Hoxton Wealth — Financial Planning Content Discovery</p>
   </div>
+  <div id="lastScan" style="font-size:0.75rem;color:#555;"></div>
 </header>
+
 <div class="controls">
   <div class="search-box">
     <span style="color:#555">🔍</span>
-    <input type="text" id="searchInput" placeholder="Search TikTok... e.g. financial planning" value="financial planning expat" />
+    <input type="text" id="searchInput" placeholder="e.g. financial planning expat" value="financial planning expat" />
   </div>
-  <button class="btn" id="searchBtn" onclick="runSearch()">Search TikTok</button>
+
+  <div class="days-box">
+    📅 Last
+    <select id="daysSelect">
+      <option value="7">7 days</option>
+      <option value="14">14 days</option>
+      <option value="30" selected>30 days</option>
+      <option value="90">90 days</option>
+    </select>
+  </div>
+
+  <button class="btn btn-primary" id="searchBtn" onclick="runSearch()">🔍 Search TikTok</button>
+  <button class="btn btn-weekly" id="weeklyBtn" onclick="runWeeklyScan()">📅 Weekly Scan</button>
+  <span class="scan-note">Run every Monday for fresh videos</span>
 </div>
+
 <div class="main">
   <div class="loading" id="loadingEl" style="display:none;">
     <div class="spinner"></div>
     <div id="loadingMsg">Searching TikTok...</div>
   </div>
+
   <div class="empty" id="emptyEl">
     <div style="font-size:2rem;margin-bottom:1rem;">🎬</div>
-    <div>Enter a keyword and click Search TikTok</div>
+    <div>Enter a keyword and click Search — or hit Weekly Scan for this week's top videos</div>
   </div>
+
+  <div class="results-header" id="resultsHeader" style="display:none;">
+    <span class="results-count" id="resultsCount"></span>
+  </div>
+
   <div class="grid" id="cardGrid"></div>
 </div>
+
 <script>
+// ── Weekly scan keywords (edit this list to add more topics) ──
+const WEEKLY_KEYWORDS = [
+  'financial planning expat',
+  'expat tax advice',
+  'international pension',
+  'offshore investment',
+  'expat wealth management'
+];
+
+async function runWeeklyScan() {
+  // Runs through all weekly keywords and combines results
+  setLoading(true, '📅 Running weekly scan across all keywords...');
+  document.getElementById('weeklyBtn').disabled = true;
+  document.getElementById('searchBtn').disabled = true;
+
+  const allResults = [];
+
+  for (let i = 0; i < WEEKLY_KEYWORDS.length; i++) {
+    const kw = WEEKLY_KEYWORDS[i];
+    document.getElementById('loadingMsg').textContent =
+      `📅 Weekly scan (${i + 1}/${WEEKLY_KEYWORDS.length}): searching "${kw}"...`;
+    try {
+      const resp = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ keyword: kw, days: 7 }) // weekly = last 7 days only
+      });
+      const videos = await resp.json();
+      if (Array.isArray(videos)) allResults.push(...videos);
+    } catch (e) {
+      console.log('Weekly scan error for', kw, e.message);
+    }
+  }
+
+  // Deduplicate by video_id, sort by score
+  const seen = new Set();
+  const unique = allResults
+    .filter(v => { if (seen.has(v.video_id)) return false; seen.add(v.video_id); return true; })
+    .sort((a, b) => Number(b.score) - Number(a.score));
+
+  setLoading(false);
+  saveLastScan();
+  renderCards(unique, `Weekly Scan — last 7 days`);
+
+  document.getElementById('weeklyBtn').disabled = false;
+  document.getElementById('searchBtn').disabled = false;
+}
+
 async function runSearch() {
   const keyword = document.getElementById('searchInput').value.trim();
+  const days    = parseInt(document.getElementById('daysSelect').value);
   if (!keyword) return;
-  document.getElementById('loadingEl').style.display = 'block';
-  document.getElementById('emptyEl').style.display = 'none';
-  document.getElementById('cardGrid').innerHTML = '';
+
+  setLoading(true, `Searching TikTok for "${keyword}"... AI is analyzing, please wait 30–60 seconds`);
   document.getElementById('searchBtn').disabled = true;
-  document.getElementById('loadingMsg').textContent = 'Searching TikTok for "' + keyword + '"... (AI is analyzing, please wait 30-60 seconds)';
- 
+  document.getElementById('weeklyBtn').disabled = true;
+
   try {
     const resp = await fetch('/api/analyze', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ keyword })
+      body: JSON.stringify({ keyword, days })
     });
     const videos = await resp.json();
-    renderCards(videos);
+    renderCards(videos, `"${keyword}" — last ${days} days`);
   } catch (err) {
     alert('Something went wrong: ' + err.message);
   }
- 
-  document.getElementById('loadingEl').style.display = 'none';
+
+  setLoading(false);
   document.getElementById('searchBtn').disabled = false;
+  document.getElementById('weeklyBtn').disabled = false;
 }
- 
-function renderCards(videos) {
+
+function setLoading(show, msg = '') {
+  document.getElementById('loadingEl').style.display = show ? 'block' : 'none';
+  document.getElementById('emptyEl').style.display   = 'none';
+  document.getElementById('cardGrid').innerHTML      = show ? '' : document.getElementById('cardGrid').innerHTML;
+  document.getElementById('resultsHeader').style.display = 'none';
+  if (msg) document.getElementById('loadingMsg').textContent = msg;
+}
+
+function saveLastScan() {
+  const now = new Date().toLocaleDateString('en-GB', { weekday:'short', day:'numeric', month:'short', year:'numeric' });
+  localStorage.setItem('lastScan', now);
+  document.getElementById('lastScan').textContent = '🕐 Last weekly scan: ' + now;
+}
+
+// Show last scan time on load
+window.onload = () => {
+  const last = localStorage.getItem('lastScan');
+  if (last) document.getElementById('lastScan').textContent = '🕐 Last weekly scan: ' + last;
+};
+
+function toggleTranscript(id) {
+  const el = document.getElementById('tc-' + id);
+  const btn = document.getElementById('tb-' + id);
+  if (el.classList.contains('open')) {
+    el.classList.remove('open');
+    btn.querySelector('span').textContent = '▼';
+  } else {
+    el.classList.add('open');
+    btn.querySelector('span').textContent = '▲';
+  }
+}
+
+function renderCards(videos, searchLabel) {
   const grid = document.getElementById('cardGrid');
-  if (!videos.length) {
+  grid.innerHTML = '';
+
+  if (!Array.isArray(videos) || !videos.length) {
     document.getElementById('emptyEl').style.display = 'block';
-    document.getElementById('emptyEl').innerHTML = '<div style="font-size:2rem;margin-bottom:1rem;">😕</div><div style="color:#666">No videos passed the filter. Try a different keyword.</div>';
+    document.getElementById('emptyEl').innerHTML =
+      '<div style="font-size:2rem;margin-bottom:1rem;">😕</div>' +
+      '<div style="color:#666">No recent videos passed the filter. Try a broader keyword or longer date range.</div>';
     return;
   }
- 
-  videos.forEach(v => {
-    const scoreClass = v.score >= 8 ? 'score-high' : v.score >= 6 ? 'score-mid' : 'score-low';
+
+  document.getElementById('resultsHeader').style.display = 'flex';
+  document.getElementById('resultsCount').textContent =
+    `${videos.length} video${videos.length !== 1 ? 's' : ''} found — ${searchLabel}`;
+
+  videos.forEach((v, i) => {
+    const score      = Number(v.score) || 0;
+    const scoreClass = score >= 8 ? 'score-high' : score >= 6 ? 'score-mid' : 'score-low';
+    const hasRealTranscript = v.transcript && !v.transcript.includes('unavailable');
+    const transcriptLabel   = hasRealTranscript ? '🎙️ Show transcript' : '🎙️ No transcript available';
+
     const card = document.createElement('div');
     card.className = 'card';
     card.innerHTML = `
       <div class="card-thumb">
-        ${v.thumbnail ? `<img src="${v.thumbnail}" loading="lazy" onerror="this.style.display='none'" />` : '<span style="font-size:2rem">🎬</span>'}
-        <div class="score-badge ${scoreClass}">AI ${v.score}/10</div>
+        ${v.thumbnail
+          ? `<img src="${v.thumbnail}" loading="lazy" onerror="this.style.display='none'" />`
+          : '<span style="font-size:2rem">🎬</span>'}
+        <div class="score-badge ${scoreClass}">AI ${score}/10</div>
+        ${v.posted_label ? `<div class="date-badge">📅 ${v.posted_label}</div>` : ''}
       </div>
+
       <div class="card-body">
-        <div class="card-author">@${v.author}</div>
+        <div class="card-author">@${v.author || 'Unknown'}</div>
         <div class="card-title">${v.desc || 'No caption'}</div>
+
         <div class="card-meta">
-          <span>👁 ${v.views.toLocaleString()}</span>
-          <span>❤️ ${v.likes.toLocaleString()}</span>
-          <span>💬 ${v.comments.toLocaleString()}</span>
-          <span>🔁 ${v.shares.toLocaleString()}</span>
+          <span>👁 ${(v.views || 0).toLocaleString()}</span>
+          <span>❤️ ${(v.likes || 0).toLocaleString()}</span>
+          <span>💬 ${(v.comments || 0).toLocaleString()}</span>
+          <span>🔁 ${(v.shares || 0).toLocaleString()}</span>
         </div>
-        <div class="ai-box"><strong>📌 Topic:</strong> ${v.topic || 'N/A'}</div>
-        <div class="ai-box"><strong>👥 Audience fit:</strong> ${v.audience_fit || 'N/A'}</div>
-        <div class="ai-box"><strong>🎙️ Tone:</strong> ${v.tone || 'N/A'}</div>
-        <div class="ai-box"><strong>🎬 Visuals:</strong> ${v.visuals || 'N/A'}</div>
-        <div class="ai-box"><strong>💡 Content idea:</strong> ${v.content_idea || 'N/A'}</div>
-        <div class="ai-box"><strong>📝 Summary:</strong> ${v.summary || 'N/A'}</div>
+
+        <div class="ai-box"><strong>📌 Topic</strong>${v.topic || 'N/A'}</div>
+        <div class="ai-box"><strong>👥 Audience fit</strong>${v.audience_fit || 'N/A'}</div>
+        <div class="ai-box"><strong>🎙️ Tone</strong>${v.tone || 'N/A'}</div>
+        <div class="ai-box"><strong>🗣️ What they say</strong>${v.what_they_say || 'N/A'}</div>
+
+        <div class="transcript-box">
+          <button class="transcript-toggle" id="tb-${i}" onclick="toggleTranscript(${i})">
+            ${transcriptLabel} <span>▼</span>
+          </button>
+          <div class="transcript-content" id="tc-${i}">${hasRealTranscript ? v.transcript : 'No transcript available for this video.'}</div>
+        </div>
+
+        <div class="script-box"><strong>✍️ Draft script idea</strong>${v.draft_script || 'N/A'}</div>
+        <div class="ai-box"><strong>📝 Summary</strong>${v.summary || 'N/A'}</div>
+
         <div class="card-actions">
-          <a href="${v.url}" target="_blank">▶ Watch on TikTok</a>
+          <a href="${v.url || '#'}" target="_blank">▶ Watch on TikTok</a>
         </div>
       </div>`;
     grid.appendChild(card);
