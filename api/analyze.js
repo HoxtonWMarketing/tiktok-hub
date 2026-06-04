@@ -44,68 +44,45 @@ export default async function handler(req, res) {
       })
       .filter(v => v.views >= 100000 && v.likes >= 2000);
 
-    // Step 3 - Download and analyze each video
+    // Step 3 - Get transcript + analyze each video
     const results = [];
     for (const v of filtered.slice(0, 3)) {
-      let videoBase64 = null;
+      let transcript = '';
 
       try {
-        // Try downloading via ytdlp-web serverless API
         const tiktokUrl = `https://www.tiktok.com/@${v.username}/video/${v.video_id}`;
-        const downloadResp = await fetch(
-          `https://yozora.vercel.app/api/download?url=${encodeURIComponent(tiktokUrl)}&format=mp4`,
-          { signal: AbortSignal.timeout(20000) }
+        const transcriptResp = await fetch(
+          `https://api.scrapecreators.com/v1/tiktok/transcript?url=${encodeURIComponent(tiktokUrl)}&language=en`,
+          { headers: { 'x-api-key': scrapeKey } }
         );
-
-        if (downloadResp.ok) {
-          const videoBuffer = await downloadResp.arrayBuffer();
-          videoBase64 = Buffer.from(videoBuffer).toString('base64');
-        }
+        const transcriptData = await transcriptResp.json();
+        transcript = transcriptData.transcript || transcriptData.text || '';
       } catch (e) {
-        console.log('Download failed, using caption only:', e.message);
+        console.log('Transcript failed:', e.message);
       }
 
-      // Build AI message
-      let aiContent;
-      if (videoBase64) {
-        aiContent = [
-          {
-            type: 'image_url',
-            image_url: { url: `data:video/mp4;base64,${videoBase64}` }
-          },
-          {
-            type: 'text',
-            text: `You are a content strategist for Hoxton Wealth, a financial planning company for expats.
+      const prompt = `You are a content strategist for Hoxton Wealth, a financial planning company for expats.
 
-Watch this TikTok video carefully and analyze everything you see:
+Analyze this TikTok video:
 Creator: @${v.author}
 Caption: ${v.desc}
 Views: ${v.views.toLocaleString()}
 Likes: ${v.likes.toLocaleString()}
+Comments: ${v.comments.toLocaleString()}
+Shares: ${v.shares.toLocaleString()}
+${transcript ? `Full Transcript of what was said: ${transcript}` : 'Transcript: Not available'}
 
-Analyze:
+Based on the caption and transcript give a thorough analysis:
 1. SCORE (1-10): Relevance for Hoxton Wealth expat audience
-2. TOPIC: What financial topic does this cover?
+2. TOPIC: What specific financial topic does this cover?
 3. AUDIENCE FIT: Does this match expats with complex financial needs?
 4. TONE: Is the tone professional enough for Hoxton Wealth?
-5. VISUALS: Describe exactly what you SEE — the person, background, setting, clothing, style
+5. WHAT THEY SAY: Key points from the transcript
 6. CONTENT IDEA: Specific idea for Hoxton Wealth to create a similar expat video
 7. SUMMARY: One sentence summary
 
 Reply ONLY as JSON:
-{"score": number, "topic": "string", "audience_fit": "string", "tone": "string", "visuals": "string", "content_idea": "string", "summary": "string"}`
-          }
-        ];
-      } else {
-        aiContent = `You are a content strategist for Hoxton Wealth, a financial planning company for expats.
-Analyze this TikTok:
-Creator: @${v.author}
-Caption: ${v.desc}
-Views: ${v.views.toLocaleString()}, Likes: ${v.likes.toLocaleString()}
-
-Reply ONLY as JSON:
-{"score": number, "topic": "string", "audience_fit": "string", "tone": "string", "visuals": "Video could not be downloaded", "content_idea": "string", "summary": "string"}`;
-      }
+{"score": number, "topic": "string", "audience_fit": "string", "tone": "string", "visuals": "string", "content_idea": "string", "summary": "string"}`;
 
       try {
         const aiResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -117,7 +94,7 @@ Reply ONLY as JSON:
           body: JSON.stringify({
             model: 'google/gemini-2.5-flash',
             max_tokens: 1000,
-            messages: [{ role: 'user', content: aiContent }]
+            messages: [{ role: 'user', content: prompt }]
           })
         });
 
@@ -133,7 +110,7 @@ Reply ONLY as JSON:
           topic: 'Finance',
           audience_fit: 'Could not analyze',
           tone: 'Could not analyze',
-          visuals: 'Could not analyze',
+          visuals: 'Not available',
           content_idea: 'Could not analyze',
           summary: 'Analysis failed'
         });
