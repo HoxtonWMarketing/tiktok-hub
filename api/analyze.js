@@ -13,7 +13,8 @@
 // ROADMAP:
 // [x] Transcript: fetch what creator says, show on card
 // [x] Date filter: only recent videos (last 30 days)
-// [x] Better AI output: score, topic, audience fit, tone, what they say, draft script idea, summary
+// [x] Better AI output: score, topic, audience fit, tone,
+//     what they say, draft script idea, summary
 // [ ] Weekly scan button: team clicks every Monday
 // [ ] Download investigation (skipping for now - Vercel limitation)
 // ============================================================
@@ -88,21 +89,25 @@ export default async function handler(req, res) {
 
       try {
         const tiktokUrl = `https://www.tiktok.com/@${v.username}/video/${v.video_id}`;
+
+        // FIXED: correct endpoint is /v1/tiktok/video/transcript
+        // use_ai_as_fallback=true → if creator has no captions, AI generates transcript
+        // costs 10 credits per video, only works for videos under 2 minutes
         const transcriptResp = await fetch(
-          `https://api.scrapecreators.com/v1/tiktok/transcript?url=${encodeURIComponent(tiktokUrl)}&language=en`,
+          `https://api.scrapecreators.com/v1/tiktok/video/transcript?url=${encodeURIComponent(tiktokUrl)}&language=en&use_ai_as_fallback=true`,
           { headers: { 'x-api-key': scrapeKey } }
         );
         const td = await transcriptResp.json();
 
-        // Check all possible fields ScrapeCreators might return
-        transcript =
-          td.transcript ||
-          td.text       ||
-          td.subtitles  ||
-          (Array.isArray(td.data) ? td.data.map(s => s.text || s.word || '').join(' ') : '') ||
-          '';
-
-        if (transcript && transcript.length > 20) {
+        // Transcript returns as WEBVTT format with timestamps — strip them to get clean text
+        // Example raw: "WEBVTT\n\n00:00:00.120 --> 00:00:01.840\nHello world\n\n"
+        const raw = td.transcript || td.text || '';
+        if (raw && raw.length > 20) {
+          transcript = raw
+            .replace(/WEBVTT\n?/g, '')
+            .replace(/\d{2}:\d{2}:\d{2}\.\d{3} --> \d{2}:\d{2}:\d{2}\.\d{3}\n?/g, '')
+            .replace(/\n{2,}/g, ' ')
+            .trim();
           transcriptNote = transcript;
         }
       } catch (e) {
