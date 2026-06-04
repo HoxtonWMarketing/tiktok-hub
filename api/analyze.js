@@ -13,8 +13,7 @@
 // ROADMAP:
 // [x] Transcript: fetch what creator says, show on card
 // [x] Date filter: only recent videos (last 30 days)
-// [x] Better AI output: score, topic, audience fit, tone,
-//     what they say, draft script idea, summary
+// [x] Better AI output: score, topic, audience fit, tone, what they say, draft script idea, summary
 // [ ] Weekly scan button: team clicks every Monday
 // [ ] Download investigation (skipping for now - Vercel limitation)
 // ============================================================
