@@ -23,7 +23,7 @@ export default async function handler(req, res) {
     const data = await response.json();
     const videos = data.search_item_list || [];
 
-    // Step 2 - Filter first
+    // Step 2 - Filter: 100K+ views AND 2K+ likes
     const filtered = videos
       .map(item => {
         const info = item.aweme_info || {};
@@ -61,6 +61,7 @@ export default async function handler(req, res) {
         console.log('Transcript failed:', e.message);
       }
 
+      // ---- FIXED PROMPT ----
       const prompt = `You are a content strategist for Hoxton Wealth, a financial planning company for expats.
 
 Analyze this TikTok video:
@@ -72,17 +73,19 @@ Comments: ${v.comments.toLocaleString()}
 Shares: ${v.shares.toLocaleString()}
 ${transcript ? `Full Transcript of what was said: ${transcript}` : 'Transcript: Not available'}
 
-Based on the caption and transcript give a thorough analysis:
-1. SCORE (1-10): Relevance for Hoxton Wealth expat audience
-2. TOPIC: What specific financial topic does this cover?
-3. AUDIENCE FIT: Does this match expats with complex financial needs?
-4. TONE: Is the tone professional enough for Hoxton Wealth?
-5. WHAT THEY SAY: Key points from the transcript
-6. CONTENT IDEA: Specific idea for Hoxton Wealth to create a similar expat video
-7. SUMMARY: One sentence summary
+Based on the caption and transcript give a thorough analysis. Reply ONLY as a flat JSON object with exactly these string fields:
+{
+  "score": <number 1-10, relevance for Hoxton Wealth expat audience>,
+  "topic": "<what specific financial topic this covers>",
+  "audience_fit": "<does this match expats with complex financial needs?>",
+  "tone": "<is the tone professional enough for Hoxton Wealth?>",
+  "visuals": "<describe the visual style, setting, editing based on what you know>",
+  "content_idea": "<one specific idea for Hoxton Wealth to create a similar expat video>",
+  "summary": "<one sentence: why this video is or isn't useful for Hoxton Wealth>"
+}
 
-Reply ONLY as JSON:
-{"score": number, "topic": "string", "audience_fit": "string", "tone": "string", "visuals": "string", "content_idea": "string", "summary": "string"}`;
+All values must be plain strings. Do not nest objects. Do not add extra fields.`;
+      // ---- END FIXED PROMPT ----
 
       try {
         const aiResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
