@@ -1,22 +1,16 @@
 // ============================================================
 // Hoxton Wealth — TikTok Content Hub
 // api/analyze.js  |  Vercel Pro (60s timeout)
-// Last updated: June 2026 — Noura
+// WHISPER VERSION — June 2026 — Noura
 //
-// WHAT THIS FILE DOES:
-// 1. Searches TikTok by keyword via ScrapeCreators
-// 2. Filters: 100K+ views AND 2K+ likes AND posted within 30 days
-// 3. Fetches transcript (what creator actually says)
-// 4. Sends to Gemini AI for full analysis + draft script idea
-// 5. Returns results sorted by AI score
+// WHAT CHANGED FROM THE OLD VERSION:
+// - Transcript no longer uses ScrapeCreators AI fallback (was 11 credits/video)
+// - Now: take the video's MP4 URL (free, already in search results)
+//        download the audio into memory
+//        send it to Whisper via OpenRouter (~$0.006/video, 0 ScrapeCreators credits)
+// - If Whisper fails for any video, falls back to caption-only analysis (never crashes)
 //
-// ROADMAP:
-// [x] Transcript: fetch what creator says, show on card
-// [x] Date filter: only recent videos (last 30 days)
-// [x] Better AI output: score, topic, audience fit, tone,
-//     what they say, draft script idea, summary
-// [ ] Weekly scan button: team clicks every Monday
-// [ ] Download investigation (skipping for now - Vercel limitation)
+// COST: 1 ScrapeCreators credit per search. That's it. No more 11-credit transcripts.
 // ============================================================
 
 export const config = {
@@ -36,7 +30,7 @@ export default async function handler(req, res) {
     const scrapeKey = process.env.SCRAPE_API_KEY;
     const openrouterKey = process.env.OPENROUTER_API_KEY;
 
-    // ── STEP 1: Search TikTok ─────────────────────────────
+    // ── STEP 1: Search TikTok (1 credit) ──────────────────
     const response = await fetch(
       `https://api.scrapecreators.com/v1/tiktok/search/keyword?query=${encodeURIComponent(keyword)}`,
       { headers: { 'x-api-key': scrapeKey } }
@@ -44,15 +38,14 @@ export default async function handler(req, res) {
     const data = await response.json();
     const videos = data.search_item_list || [];
 
-    // ── STEP 2: Filter ────────────────────────────────────
-    // Keep only: 100K+ views AND 2K+ likes AND posted within `days` days
+    // ── STEP 2: Filter — 100K+ views, 2K+ likes, recent ──
     const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
 
     const filtered = videos
       .map(item => {
         const info  = item.aweme_info || {};
         const stats = info.statistics || {};
-        // TikTok timestamp is in seconds, convert to ms
+        const video = info.video || {};
         const postedAt = (info.create_time || 0) * 1000;
         return {
           author:    info.author?.nickname  || '',
@@ -65,7 +58,9 @@ export default async function handler(req, res) {
           shares:    stats.share_count      || 0,
           saves:     stats.collect_count    || 0,
           url:       info.url               || '',
-          thumbnail: info.video?.cover?.url_list?.[0] || '',
+          thumbnail: video.cover?.url_list?.[0] || '',
+          // MP4 URL — already in the search results, free. Used for Whisper.
+          mp4_url:   video.play_addr?.url_list?.[0] || '',
           posted_at: postedAt,
           posted_label: postedAt
             ? new Date(postedAt).toLocaleDateString('en-GB', { day:'numeric', month:'short', year:'numeric' })
@@ -75,43 +70,62 @@ export default async function handler(req, res) {
       .filter(v =>
         v.views >= 100000 &&
         v.likes >= 2000 &&
-        (v.posted_at === 0 || v.posted_at >= cutoff) // keep if date unknown, filter old ones if date known
+        (v.posted_at === 0 || v.posted_at >= cutoff)
       );
 
-    // ── STEP 3: Transcript + AI analysis ─────────────────
+    // ── STEP 3: Whisper transcript + AI analysis ─────────
     const results = [];
 
     for (const v of filtered.slice(0, 5)) {
 
-      // 3a. Fetch transcript
+      // 3a. Transcribe with Whisper via OpenRouter
       let transcript     = '';
       let transcriptNote = 'Transcript unavailable — analysis based on caption only.';
 
-      try {
-        const tiktokUrl = `https://www.tiktok.com/@${v.username}/video/${v.video_id}`;
+      if (v.mp4_url) {
+        try {
+          // Download the video into memory (no saving to disk)
+          const videoResp = await fetch(v.mp4_url, {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+              'Referer': 'https://www.tiktok.com/'
+            }
+          });
 
-        // FIXED: correct endpoint is /v1/tiktok/video/transcript
-        // use_ai_as_fallback=true → if creator has no captions, AI generates transcript
-        // costs 10 credits per video, only works for videos under 2 minutes
-        const transcriptResp = await fetch(
-          `https://api.scrapecreators.com/v1/tiktok/video/transcript?url=${encodeURIComponent(tiktokUrl)}&language=en&use_ai_as_fallback=true`,
-          { headers: { 'x-api-key': scrapeKey } }
-        );
-        const td = await transcriptResp.json();
+          if (videoResp.ok) {
+            const arrayBuffer = await videoResp.arrayBuffer();
+            const sizeMB = arrayBuffer.byteLength / (1024 * 1024);
 
-        // Transcript returns as WEBVTT format with timestamps — strip them to get clean text
-        // Example raw: "WEBVTT\n\n00:00:00.120 --> 00:00:01.840\nHello world\n\n"
-        const raw = td.transcript || td.text || '';
-        if (raw && raw.length > 20) {
-          transcript = raw
-            .replace(/WEBVTT\n?/g, '')
-            .replace(/\d{2}:\d{2}:\d{2}\.\d{3} --> \d{2}:\d{2}:\d{2}\.\d{3}\n?/g, '')
-            .replace(/\n{2,}/g, ' ')
-            .trim();
-          transcriptNote = transcript;
+            // Whisper limit is 25MB — skip if too big
+            if (sizeMB <= 25) {
+              const base64Audio = Buffer.from(arrayBuffer).toString('base64');
+
+              // Send to Whisper via OpenRouter transcription endpoint
+              const whisperResp = await fetch('https://openrouter.ai/api/v1/audio/transcriptions', {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${openrouterKey}`,
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                  model: 'openai/whisper-1',
+                  input_audio: { data: base64Audio, format: 'mp4' }
+                })
+              });
+
+              const whisperData = await whisperResp.json();
+              const text = whisperData.text || whisperData.transcript || '';
+              if (text && text.length > 20) {
+                transcript = text.trim();
+                transcriptNote = transcript;
+              }
+            } else {
+              console.log(`Video ${v.video_id} too big for Whisper: ${sizeMB.toFixed(1)}MB`);
+            }
+          }
+        } catch (e) {
+          console.log(`Whisper transcript failed for ${v.video_id}:`, e.message);
         }
-      } catch (e) {
-        console.log(`Transcript failed for ${v.video_id}:`, e.message);
       }
 
       const hasTranscript = transcript && transcript.length > 20;
