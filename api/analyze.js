@@ -38,6 +38,11 @@ export default async function handler(req, res) {
     const data = await response.json();
     const videos = data.search_item_list || [];
 
+    // Capture how many ScrapeCreators credits are left after this search call.
+    // The API returns credits_remaining in its response (per ScrapeCreators docs).
+    const creditsRemaining = data.credits_remaining ?? 'unknown';
+    console.log(`ScrapeCreators credits remaining after search: ${creditsRemaining}`);
+
     // ── STEP 2: Filter — 100K+ views, 2K+ likes, recent ──
     const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
 
