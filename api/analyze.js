@@ -94,46 +94,45 @@ export default async function handler(req, res) {
             'Referer': 'https://www.tiktok.com/'
           };
 
-          // Check the file size FIRST (HEAD request) — avoids downloading huge files
-          let sizeMB = 0;
+          // Download the video directly with a 15-second cap so a slow video
+          // can't eat the whole 60-second budget. (No HEAD request — it was
+          // causing timeouts.)
+          const dlController = new AbortController();
+          const dlTimeout = setTimeout(() => dlController.abort(), 15000);
+
+          let videoResp;
           try {
-            const headResp = await fetch(v.mp4_url, { method: 'HEAD', headers });
-            const len = headResp.headers.get('content-length');
-            if (len) sizeMB = parseInt(len) / (1024 * 1024);
-          } catch (e) { /* HEAD failed — we'll check size after download instead */ }
+            videoResp = await fetch(v.mp4_url, { headers, signal: dlController.signal });
+          } finally {
+            clearTimeout(dlTimeout);
+          }
 
-          if (sizeMB > 24) {
-            // Too big for Whisper — skip transcript, note it, but Gemini still analyses the rest
-            transcriptNote = `Video too large for transcript (${sizeMB.toFixed(0)}MB). Analysis based on caption only.`;
-          } else {
-            const videoResp = await fetch(v.mp4_url, { headers });
-            if (videoResp.ok) {
-              const arrayBuffer = await videoResp.arrayBuffer();
-              const actualMB = arrayBuffer.byteLength / (1024 * 1024);
+          if (videoResp && videoResp.ok) {
+            const arrayBuffer = await videoResp.arrayBuffer();
+            const actualMB = arrayBuffer.byteLength / (1024 * 1024);
 
-              if (actualMB > 24) {
-                transcriptNote = `Video too large for transcript (${actualMB.toFixed(0)}MB). Analysis based on caption only.`;
+            if (actualMB > 24) {
+              transcriptNote = `Video too large for transcript (${actualMB.toFixed(0)}MB). Analysis based on caption only.`;
+            } else {
+              const base64Audio = Buffer.from(arrayBuffer).toString('base64');
+              const whisperResp = await fetch('https://openrouter.ai/api/v1/audio/transcriptions', {
+                method: 'POST',
+                headers: {
+                  'Authorization': `Bearer ${openrouterKey}`,
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                  model: 'openai/whisper-1',
+                  input_audio: { data: base64Audio, format: 'mp4' }
+                })
+              });
+              const whisperData = await whisperResp.json();
+              const text = whisperData.text || whisperData.transcript || '';
+              if (text && text.length > 20) {
+                transcript = text.trim();
+                transcriptNote = transcript;
               } else {
-                const base64Audio = Buffer.from(arrayBuffer).toString('base64');
-                const whisperResp = await fetch('https://openrouter.ai/api/v1/audio/transcriptions', {
-                  method: 'POST',
-                  headers: {
-                    'Authorization': `Bearer ${openrouterKey}`,
-                    'Content-Type': 'application/json'
-                  },
-                  body: JSON.stringify({
-                    model: 'openai/whisper-1',
-                    input_audio: { data: base64Audio, format: 'mp4' }
-                  })
-                });
-                const whisperData = await whisperResp.json();
-                const text = whisperData.text || whisperData.transcript || '';
-                if (text && text.length > 20) {
-                  transcript = text.trim();
-                  transcriptNote = transcript;
-                } else {
-                  transcriptNote = 'No speech detected in video. Analysis based on caption only.';
-                }
+                transcriptNote = 'No speech detected in video. Analysis based on caption only.';
               }
             }
           }
