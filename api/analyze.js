@@ -46,6 +46,15 @@ export default async function handler(req, res) {
     const creditsRemaining = (data.credits_remaining !== undefined && data.credits_remaining !== null) ? data.credits_remaining : 'unknown';
     console.log(`ScrapeCreators credits remaining after search: ${creditsRemaining}`);
 
+    // DIAGNOSTIC: show how many videos came back, the top-level keys of the
+    // response, and the raw structure of the first video so we can see the
+    // EXACT field names. Remove this once the filter is confirmed working.
+    console.log(`[DEBUG] videos returned: ${videos.length}`);
+    console.log(`[DEBUG] response top-level keys: ${Object.keys(data).join(', ')}`);
+    if (videos.length > 0) {
+      console.log(`[DEBUG] first video structure: ${JSON.stringify(videos[0]).slice(0, 1500)}`);
+    }
+
     // ── STEP 2: Filter — 100K+ views, 2K+ likes, recent ──
     const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
 
