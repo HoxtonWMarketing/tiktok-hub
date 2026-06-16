@@ -3,17 +3,13 @@
 // api/analyze.js  |  Vercel Pro (60s timeout)
 // WHISPER VERSION — June 2026 — Noura
 //
-// - Transcript no longer uses ScrapeCreators AI fallback (was 11 credits/video)
-// - Now: take the video's MP4 URL (free, already in search results)
-//        download the audio into memory
-//        send it to Whisper via OpenRouter (~$0.006/video, 0 ScrapeCreators credits)
-// - If Whisper fails for any video, falls back to caption-only analysis (never crashes)
+// HOW TRANSCRIPTS WORK:
+// - Take the video's MP4 URL (free, already in search results)
+// - Check file size FIRST. If over 24MB, skip transcript (Whisper limit is 25MB)
+//   and show a note on the card. Gemini still analyses caption + stats as normal.
+// - Otherwise download audio into memory, send to Whisper via OpenRouter (~$0.006/video)
 //
-// COST: 1 ScrapeCreators credit per search. That's it. No more 11-credit transcripts.
-//
-// FIXES (this version):
-// - Trims long transcripts before sending to Gemini (prevents oversized prompts)
-// - Robust JSON parsing of Gemini's reply (prevents 'Analysis failed' from special chars)
+// COST: 1 ScrapeCreators credit per search. Transcripts cost 0 ScrapeCreators credits.
 // ============================================================
 
 export const config = {
@@ -41,11 +37,6 @@ export default async function handler(req, res) {
     const data = await response.json();
     const videos = data.search_item_list || [];
 
-    // Capture how many ScrapeCreators credits are left after this search call.
-    // The API returns credits_remaining in its response (per ScrapeCreators docs).
-    const creditsRemaining = (data.credits_remaining !== undefined && data.credits_remaining !== null) ? data.credits_remaining : 'unknown';
-    console.log(`ScrapeCreators credits remaining after search: ${creditsRemaining}`);
-
     // ── STEP 2: Filter — 100K+ views, 2K+ likes, recent ──
     const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
 
@@ -67,7 +58,6 @@ export default async function handler(req, res) {
           saves:     stats.collect_count    || 0,
           url:       info.url               || '',
           thumbnail: video.cover?.url_list?.[0] || '',
-          // MP4 URL — already in the search results, free. Used for Whisper.
           mp4_url:   video.play_addr?.url_list?.[0] || '',
           posted_at: postedAt,
           posted_label: postedAt
@@ -86,72 +76,68 @@ export default async function handler(req, res) {
 
     for (const v of filtered.slice(0, 5)) {
 
-      // 3a. Transcribe with Whisper via OpenRouter
+      // 3a. Try to transcribe with Whisper
       let transcript     = '';
       let transcriptNote = 'Transcript unavailable — analysis based on caption only.';
 
-      if (!v.mp4_url) {
-        console.log(`[TRANSCRIPT] ${v.username}: NO MP4 URL in search data`);
-      }
-
       if (v.mp4_url) {
         try {
-          // Download the video into memory (no saving to disk)
-          const videoResp = await fetch(v.mp4_url, {
-            headers: {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-              'Referer': 'https://www.tiktok.com/'
-            }
-          });
+          const headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Referer': 'https://www.tiktok.com/'
+          };
 
-          if (!videoResp.ok) {
-            console.log(`[TRANSCRIPT] ${v.username}: DOWNLOAD BLOCKED — status ${videoResp.status}`);
-          }
+          // Check the file size FIRST (HEAD request) — avoids downloading huge files
+          let sizeMB = 0;
+          try {
+            const headResp = await fetch(v.mp4_url, { method: 'HEAD', headers });
+            const len = headResp.headers.get('content-length');
+            if (len) sizeMB = parseInt(len) / (1024 * 1024);
+          } catch (e) { /* HEAD failed — we'll check size after download instead */ }
 
-          if (videoResp.ok) {
-            const arrayBuffer = await videoResp.arrayBuffer();
-            const sizeMB = arrayBuffer.byteLength / (1024 * 1024);
-            console.log(`[TRANSCRIPT] ${v.username}: downloaded ${sizeMB.toFixed(1)}MB`);
+          if (sizeMB > 24) {
+            // Too big for Whisper — skip transcript, note it, but Gemini still analyses the rest
+            transcriptNote = `Video too large for transcript (${sizeMB.toFixed(0)}MB). Analysis based on caption only.`;
+          } else {
+            const videoResp = await fetch(v.mp4_url, { headers });
+            if (videoResp.ok) {
+              const arrayBuffer = await videoResp.arrayBuffer();
+              const actualMB = arrayBuffer.byteLength / (1024 * 1024);
 
-            // Whisper limit is 25MB — skip if too big
-            if (sizeMB <= 25) {
-              const base64Audio = Buffer.from(arrayBuffer).toString('base64');
-
-              // Send to Whisper via OpenRouter transcription endpoint
-              const whisperResp = await fetch('https://openrouter.ai/api/v1/audio/transcriptions', {
-                method: 'POST',
-                headers: {
-                  'Authorization': `Bearer ${openrouterKey}`,
-                  'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                  model: 'openai/whisper-1',
-                  input_audio: { data: base64Audio, format: 'mp4' }
-                })
-              });
-
-              const whisperData = await whisperResp.json();
-              const text = whisperData.text || whisperData.transcript || '';
-              if (text && text.length > 20) {
-                transcript = text.trim();
-                transcriptNote = transcript;
-                console.log(`[TRANSCRIPT] ${v.username}: SUCCESS — ${text.length} chars`);
+              if (actualMB > 24) {
+                transcriptNote = `Video too large for transcript (${actualMB.toFixed(0)}MB). Analysis based on caption only.`;
               } else {
-                console.log(`[TRANSCRIPT] ${v.username}: WHISPER RETURNED EMPTY — response: ${JSON.stringify(whisperData).slice(0, 200)}`);
+                const base64Audio = Buffer.from(arrayBuffer).toString('base64');
+                const whisperResp = await fetch('https://openrouter.ai/api/v1/audio/transcriptions', {
+                  method: 'POST',
+                  headers: {
+                    'Authorization': `Bearer ${openrouterKey}`,
+                    'Content-Type': 'application/json'
+                  },
+                  body: JSON.stringify({
+                    model: 'openai/whisper-1',
+                    input_audio: { data: base64Audio, format: 'mp4' }
+                  })
+                });
+                const whisperData = await whisperResp.json();
+                const text = whisperData.text || whisperData.transcript || '';
+                if (text && text.length > 20) {
+                  transcript = text.trim();
+                  transcriptNote = transcript;
+                } else {
+                  transcriptNote = 'No speech detected in video. Analysis based on caption only.';
+                }
               }
-            } else {
-              console.log(`Video ${v.video_id} too big for Whisper: ${sizeMB.toFixed(1)}MB`);
             }
           }
         } catch (e) {
-          console.log(`Whisper transcript failed for ${v.video_id}:`, e.message);
+          console.log(`Transcript failed for ${v.username}:`, e.message);
         }
       }
 
       const hasTranscript = transcript && transcript.length > 20;
 
-      // Trim very long transcripts so the Gemini prompt stays a safe size.
-      // 2000 characters is plenty for the AI to understand the video.
+      // Trim long transcripts so the Gemini prompt stays a safe size
       const transcriptForPrompt = hasTranscript
         ? (transcript.length > 2000 ? transcript.slice(0, 2000) + '...' : transcript)
         : '';
@@ -205,8 +191,7 @@ Reply ONLY as a flat JSON object. Every value must be a plain string. No nested 
         const aiData  = await aiResponse.json();
         const rawText = aiData.choices?.[0]?.message?.content || '';
 
-        // Robust JSON extraction: strip code fences, then grab just the {...} block.
-        // This avoids parse errors when the AI adds stray text or characters around it.
+        // Robust JSON extraction: grab just the {...} block
         let clean = rawText.replace(/```json|```/g, '').trim();
         const firstBrace = clean.indexOf('{');
         const lastBrace  = clean.lastIndexOf('}');
@@ -228,7 +213,7 @@ Reply ONLY as a flat JSON object. Every value must be a plain string. No nested 
         });
 
       } catch (e) {
-        console.log(`AI failed for ${v.video_id}:`, e.message);
+        console.log(`AI failed for ${v.username}:`, e.message);
         results.push({
           ...v,
           transcript:   transcriptNote,
