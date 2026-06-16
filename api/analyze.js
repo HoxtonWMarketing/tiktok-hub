@@ -46,15 +46,6 @@ export default async function handler(req, res) {
     const creditsRemaining = (data.credits_remaining !== undefined && data.credits_remaining !== null) ? data.credits_remaining : 'unknown';
     console.log(`ScrapeCreators credits remaining after search: ${creditsRemaining}`);
 
-    // DIAGNOSTIC: show how many videos came back, the top-level keys of the
-    // response, and the raw structure of the first video so we can see the
-    // EXACT field names. Remove this once the filter is confirmed working.
-    console.log(`[DEBUG] videos returned: ${videos.length}`);
-    console.log(`[DEBUG] response top-level keys: ${Object.keys(data).join(', ')}`);
-    if (videos.length > 0) {
-      console.log(`[DEBUG] first video structure: ${JSON.stringify(videos[0]).slice(0, 1500)}`);
-    }
-
     // ── STEP 2: Filter — 100K+ views, 2K+ likes, recent ──
     const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
 
@@ -208,7 +199,7 @@ Reply ONLY as a flat JSON object. Every value must be a plain string. No nested 
           },
           body: JSON.stringify({
             model: 'google/gemini-2.5-flash',
-            max_tokens: 1200,
+            max_tokens: 2000,
             // Force the model to return strictly valid JSON — prevents the
             // "Unterminated string in JSON" errors from line breaks/quotes in transcripts
             response_format: { type: 'json_object' },
@@ -231,9 +222,26 @@ Reply ONLY as a flat JSON object. Every value must be a plain string. No nested 
         try {
           parsed = JSON.parse(clean);
         } catch (parseErr) {
-          // If parsing fails, repair common issue: raw line breaks inside string values
-          const repaired = clean.replace(/[\n\r\t]+/g, ' ');
-          parsed = JSON.parse(repaired);
+          // Repair attempt 1: remove raw line breaks inside strings
+          try {
+            parsed = JSON.parse(clean.replace(/[\n\r\t]+/g, ' '));
+          } catch (e2) {
+            // Repair attempt 2: pull each field out individually with regex.
+            // This survives even a truncated/broken JSON reply.
+            const grab = (key) => {
+              const m = clean.match(new RegExp('"' + key + '"\\s*:\\s*"([^"]*)'));
+              return m ? m[1] : '';
+            };
+            parsed = {
+              score:         grab('score') || '5',
+              topic:         grab('topic'),
+              audience_fit:  grab('audience_fit'),
+              tone:          grab('tone'),
+              what_they_say: grab('what_they_say'),
+              draft_script:  grab('draft_script'),
+              summary:       grab('summary'),
+            };
+          }
         }
 
         results.push({
