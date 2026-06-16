@@ -10,6 +10,9 @@
 // - Otherwise download audio into memory, send to Whisper via OpenRouter (~$0.006/video)
 //
 // COST: 1 ScrapeCreators credit per search. Transcripts cost 0 ScrapeCreators credits.
+//
+// FIXES: 3 videos (not 5) to avoid timeout. Forces valid JSON from Gemini.
+// Repairs JSON if it still breaks. Skips oversized videos with a note.
 // ============================================================
 
 export const config = {
@@ -36,6 +39,10 @@ export default async function handler(req, res) {
     );
     const data = await response.json();
     const videos = data.search_item_list || [];
+
+    // Log how many ScrapeCreators credits are left after this search (visible in Vercel Logs)
+    const creditsRemaining = (data.credits_remaining !== undefined && data.credits_remaining !== null) ? data.credits_remaining : 'unknown';
+    console.log(`ScrapeCreators credits remaining after search: ${creditsRemaining}`);
 
     // ── STEP 2: Filter — 100K+ views, 2K+ likes, recent ──
     const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
@@ -74,7 +81,7 @@ export default async function handler(req, res) {
     // ── STEP 3: Whisper transcript + AI analysis ─────────
     const results = [];
 
-    for (const v of filtered.slice(0, 5)) {
+    for (const v of filtered.slice(0, 3)) {
 
       // 3a. Try to transcribe with Whisper
       let transcript     = '';
@@ -184,6 +191,9 @@ Reply ONLY as a flat JSON object. Every value must be a plain string. No nested 
           body: JSON.stringify({
             model: 'google/gemini-2.5-flash',
             max_tokens: 1200,
+            // Force the model to return strictly valid JSON — prevents the
+            // "Unterminated string in JSON" errors from line breaks/quotes in transcripts
+            response_format: { type: 'json_object' },
             messages: [{ role: 'user', content: prompt }]
           })
         });
@@ -198,7 +208,15 @@ Reply ONLY as a flat JSON object. Every value must be a plain string. No nested 
         if (firstBrace !== -1 && lastBrace !== -1) {
           clean = clean.slice(firstBrace, lastBrace + 1);
         }
-        const parsed = JSON.parse(clean);
+
+        let parsed;
+        try {
+          parsed = JSON.parse(clean);
+        } catch (parseErr) {
+          // If parsing fails, repair common issue: raw line breaks inside string values
+          const repaired = clean.replace(/[\n\r\t]+/g, ' ');
+          parsed = JSON.parse(repaired);
+        }
 
         results.push({
           ...v,
