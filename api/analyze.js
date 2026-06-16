@@ -91,6 +91,10 @@ export default async function handler(req, res) {
       let transcript     = '';
       let transcriptNote = 'Transcript unavailable — analysis based on caption only.';
 
+      if (!v.mp4_url) {
+        console.log(`[TRANSCRIPT] ${v.username}: NO MP4 URL in search data`);
+      }
+
       if (v.mp4_url) {
         try {
           // Download the video into memory (no saving to disk)
@@ -101,9 +105,14 @@ export default async function handler(req, res) {
             }
           });
 
+          if (!videoResp.ok) {
+            console.log(`[TRANSCRIPT] ${v.username}: DOWNLOAD BLOCKED — status ${videoResp.status}`);
+          }
+
           if (videoResp.ok) {
             const arrayBuffer = await videoResp.arrayBuffer();
             const sizeMB = arrayBuffer.byteLength / (1024 * 1024);
+            console.log(`[TRANSCRIPT] ${v.username}: downloaded ${sizeMB.toFixed(1)}MB`);
 
             // Whisper limit is 25MB — skip if too big
             if (sizeMB <= 25) {
@@ -127,6 +136,9 @@ export default async function handler(req, res) {
               if (text && text.length > 20) {
                 transcript = text.trim();
                 transcriptNote = transcript;
+                console.log(`[TRANSCRIPT] ${v.username}: SUCCESS — ${text.length} chars`);
+              } else {
+                console.log(`[TRANSCRIPT] ${v.username}: WHISPER RETURNED EMPTY — response: ${JSON.stringify(whisperData).slice(0, 200)}`);
               }
             } else {
               console.log(`Video ${v.video_id} too big for Whisper: ${sizeMB.toFixed(1)}MB`);
