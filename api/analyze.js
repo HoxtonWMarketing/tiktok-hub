@@ -3,7 +3,6 @@
 // api/analyze.js  |  Vercel Pro (60s timeout)
 // WHISPER VERSION — June 2026 — Noura
 //
-// WHAT CHANGED FROM THE OLD VERSION:
 // - Transcript no longer uses ScrapeCreators AI fallback (was 11 credits/video)
 // - Now: take the video's MP4 URL (free, already in search results)
 //        download the audio into memory
