@@ -3,6 +3,7 @@
 // api/analyze.js  |  Vercel Pro (60s timeout)
 // WHISPER VERSION — June 2026 — Noura
 //
+// WHAT CHANGED FROM THE OLD VERSION:
 // - Transcript no longer uses ScrapeCreators AI fallback (was 11 credits/video)
 // - Now: take the video's MP4 URL (free, already in search results)
 //        download the audio into memory
@@ -11,9 +12,9 @@
 //
 // COST: 1 ScrapeCreators credit per search. That's it. No more 11-credit transcripts.
 //
-// IMPROVEMENTS (this version):
-// - Processes 3 videos (was 5) — faster, avoids timeout + URL expiry
-// - Retries the video download once if it fails — fewer missing transcripts
+// FIXES (this version):
+// - Trims long transcripts before sending to Gemini (prevents oversized prompts)
+// - Robust JSON parsing of Gemini's reply (prevents 'Analysis failed' from special chars)
 // ============================================================
 
 export const config = {
@@ -84,7 +85,7 @@ export default async function handler(req, res) {
     // ── STEP 3: Whisper transcript + AI analysis ─────────
     const results = [];
 
-    for (const v of filtered.slice(0, 3)) {
+    for (const v of filtered.slice(0, 5)) {
 
       // 3a. Transcribe with Whisper via OpenRouter
       let transcript     = '';
@@ -92,26 +93,13 @@ export default async function handler(req, res) {
 
       if (v.mp4_url) {
         try {
-          // Download the video into memory (no saving to disk).
-          // Retry once if the first attempt fails — TikTok sometimes blocks
-          // the first request or the temporary URL hiccups.
-          let videoResp = await fetch(v.mp4_url, {
+          // Download the video into memory (no saving to disk)
+          const videoResp = await fetch(v.mp4_url, {
             headers: {
               'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
               'Referer': 'https://www.tiktok.com/'
             }
           });
-
-          if (!videoResp.ok) {
-            // Wait half a second and try one more time
-            await new Promise(r => setTimeout(r, 500));
-            videoResp = await fetch(v.mp4_url, {
-              headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'Referer': 'https://www.tiktok.com/'
-              }
-            });
-          }
 
           if (videoResp.ok) {
             const arrayBuffer = await videoResp.arrayBuffer();
@@ -151,6 +139,12 @@ export default async function handler(req, res) {
 
       const hasTranscript = transcript && transcript.length > 20;
 
+      // Trim very long transcripts so the Gemini prompt stays a safe size.
+      // 2000 characters is plenty for the AI to understand the video.
+      const transcriptForPrompt = hasTranscript
+        ? (transcript.length > 2000 ? transcript.slice(0, 2000) + '...' : transcript)
+        : '';
+
       // 3b. AI prompt — analysis + draft script
       const prompt = `You are a senior content strategist for Hoxton Wealth, a financial planning firm for expats — professionals living outside their home country with complex cross-border financial needs (tax, pensions, investments, currency, inheritance).
 
@@ -165,7 +159,7 @@ Likes: ${v.likes.toLocaleString()}
 Comments: ${v.comments.toLocaleString()}
 Shares: ${v.shares.toLocaleString()}
 ${hasTranscript
-  ? `Full transcript (exactly what the creator said):\n"${transcript}"`
+  ? `Full transcript (exactly what the creator said):\n"${transcriptForPrompt}"`
   : `Transcript: Not available. Base analysis on caption only and flag this.`
 }
 
@@ -199,8 +193,16 @@ Reply ONLY as a flat JSON object. Every value must be a plain string. No nested 
 
         const aiData  = await aiResponse.json();
         const rawText = aiData.choices?.[0]?.message?.content || '';
-        const clean   = rawText.replace(/```json|```/g, '').trim();
-        const parsed  = JSON.parse(clean);
+
+        // Robust JSON extraction: strip code fences, then grab just the {...} block.
+        // This avoids parse errors when the AI adds stray text or characters around it.
+        let clean = rawText.replace(/```json|```/g, '').trim();
+        const firstBrace = clean.indexOf('{');
+        const lastBrace  = clean.lastIndexOf('}');
+        if (firstBrace !== -1 && lastBrace !== -1) {
+          clean = clean.slice(firstBrace, lastBrace + 1);
+        }
+        const parsed = JSON.parse(clean);
 
         results.push({
           ...v,
