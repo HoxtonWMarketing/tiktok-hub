@@ -38,7 +38,9 @@ export default async function handler(req, res) {
       { headers: { 'x-api-key': scrapeKey } }
     );
     const data = await response.json();
-    const videos = data.search_item_list || [];
+    // The search can return the videos under different keys depending on the
+    // endpoint version — handle all of them.
+    const videos = data.search_item_list || data.aweme_list || data.items || [];
 
     // Log how many ScrapeCreators credits are left after this search (visible in Vercel Logs)
     const creditsRemaining = (data.credits_remaining !== undefined && data.credits_remaining !== null) ? data.credits_remaining : 'unknown';
@@ -49,10 +51,18 @@ export default async function handler(req, res) {
 
     const filtered = videos
       .map(item => {
-        const info  = item.aweme_info || {};
+        // Some responses nest the data under aweme_info, others put it
+        // directly on the item. Support both so the filter always sees real numbers.
+        const info  = item.aweme_info || item;
         const stats = info.statistics || {};
         const video = info.video || {};
-        const postedAt = (info.create_time || 0) * 1000;
+        // create_time can be a number (seconds) or an ISO date string
+        let postedAt = 0;
+        if (info.create_time) {
+          postedAt = typeof info.create_time === 'number'
+            ? info.create_time * 1000
+            : new Date(info.create_time).getTime();
+        }
         return {
           author:    info.author?.nickname  || '',
           username:  info.author?.unique_id || '',
