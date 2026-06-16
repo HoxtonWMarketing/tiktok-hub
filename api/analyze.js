@@ -3,7 +3,6 @@
 // api/analyze.js  |  Vercel Pro (60s timeout)
 // WHISPER VERSION — June 2026 — Noura
 //
-// WHAT CHANGED FROM THE OLD VERSION:
 // - Transcript no longer uses ScrapeCreators AI fallback (was 11 credits/video)
 // - Now: take the video's MP4 URL (free, already in search results)
 //        download the audio into memory
@@ -11,6 +10,10 @@
 // - If Whisper fails for any video, falls back to caption-only analysis (never crashes)
 //
 // COST: 1 ScrapeCreators credit per search. That's it. No more 11-credit transcripts.
+//
+// IMPROVEMENTS (this version):
+// - Processes 3 videos (was 5) — faster, avoids timeout + URL expiry
+// - Retries the video download once if it fails — fewer missing transcripts
 // ============================================================
 
 export const config = {
@@ -37,6 +40,11 @@ export default async function handler(req, res) {
     );
     const data = await response.json();
     const videos = data.search_item_list || [];
+
+    // Capture how many ScrapeCreators credits are left after this search call.
+    // The API returns credits_remaining in its response (per ScrapeCreators docs).
+    const creditsRemaining = (data.credits_remaining !== undefined && data.credits_remaining !== null) ? data.credits_remaining : 'unknown';
+    console.log(`ScrapeCreators credits remaining after search: ${creditsRemaining}`);
 
     // ── STEP 2: Filter — 100K+ views, 2K+ likes, recent ──
     const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
@@ -76,7 +84,7 @@ export default async function handler(req, res) {
     // ── STEP 3: Whisper transcript + AI analysis ─────────
     const results = [];
 
-    for (const v of filtered.slice(0, 5)) {
+    for (const v of filtered.slice(0, 3)) {
 
       // 3a. Transcribe with Whisper via OpenRouter
       let transcript     = '';
@@ -84,13 +92,26 @@ export default async function handler(req, res) {
 
       if (v.mp4_url) {
         try {
-          // Download the video into memory (no saving to disk)
-          const videoResp = await fetch(v.mp4_url, {
+          // Download the video into memory (no saving to disk).
+          // Retry once if the first attempt fails — TikTok sometimes blocks
+          // the first request or the temporary URL hiccups.
+          let videoResp = await fetch(v.mp4_url, {
             headers: {
               'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
               'Referer': 'https://www.tiktok.com/'
             }
           });
+
+          if (!videoResp.ok) {
+            // Wait half a second and try one more time
+            await new Promise(r => setTimeout(r, 500));
+            videoResp = await fetch(v.mp4_url, {
+              headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Referer': 'https://www.tiktok.com/'
+              }
+            });
+          }
 
           if (videoResp.ok) {
             const arrayBuffer = await videoResp.arrayBuffer();
