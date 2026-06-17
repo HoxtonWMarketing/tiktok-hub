@@ -1,13 +1,10 @@
 {
-  "version": 2,
-  "routes": [
-    {
-      "src": "/api/analyze",
-      "dest": "/api/analyze.js"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "/index.html"
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "api/analyze.js": {
+      "maxDuration": 60,
+      "memory": 3009,
+      "includeFiles": "node_modules/ffmpeg-static/**"
     }
-  ]
+  }
 }
