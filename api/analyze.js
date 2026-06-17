@@ -1,7 +1,9 @@
 // ============================================================
 // Hoxton Wealth — TikTok Content Hub
 // api/analyze.js  |  Vercel Pro (60s timeout)
-// WHISPER VERSION — June 2026 — Noura
+// WHISPER + FFMPEG VERSION — June 2026 — Noura
+// Uses ffmpeg to strip audio to a tiny mp3 before sending to Whisper.
+// This fixes the 25MB video-size problem — mp3 is only a few hundred KB.
 //
 // HOW TRANSCRIPTS WORK:
 // - Take the video's MP4 URL (free, already in search results)
@@ -15,9 +17,40 @@
 // Repairs JSON if it still breaks. Skips oversized videos with a note.
 // ============================================================
 
+import ffmpegPath from 'ffmpeg-static';
+import { spawn } from 'child_process';
+import { writeFile, readFile, unlink } from 'fs/promises';
+import { tmpdir } from 'os';
+import { join } from 'path';
+
 export const config = {
   maxDuration: 60
 };
+
+// Strip audio from a video buffer into a small MP3 using ffmpeg.
+// Writes the video to /tmp, runs ffmpeg, reads back the mp3, cleans up.
+async function extractAudioMp3(videoBuffer, id) {
+  const inPath  = join(tmpdir(), `in_${id}.mp4`);
+  const outPath = join(tmpdir(), `out_${id}.mp3`);
+  await writeFile(inPath, videoBuffer);
+
+  await new Promise((resolve, reject) => {
+    // -vn = no video, -ac 1 = mono, -ar 16000 = 16kHz (plenty for speech),
+    // -b:a 64k = small bitrate. Keeps the mp3 tiny and fast for Whisper.
+    const ff = spawn(ffmpegPath, [
+      '-i', inPath, '-vn', '-ac', '1', '-ar', '16000', '-b:a', '64k',
+      '-f', 'mp3', outPath, '-y'
+    ]);
+    ff.on('close', code => code === 0 ? resolve() : reject(new Error('ffmpeg exit ' + code)));
+    ff.on('error', reject);
+  });
+
+  const mp3 = await readFile(outPath);
+  // Clean up temp files (ignore errors)
+  unlink(inPath).catch(() => {});
+  unlink(outPath).catch(() => {});
+  return mp3;
+}
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -104,9 +137,7 @@ export default async function handler(req, res) {
             'Referer': 'https://www.tiktok.com/'
           };
 
-          // Download the video directly with a 15-second cap so a slow video
-          // can't eat the whole 60-second budget. (No HEAD request — it was
-          // causing timeouts.)
+          // Download the video (15-second cap so a slow video can't eat the budget)
           const dlController = new AbortController();
           const dlTimeout = setTimeout(() => dlController.abort(), 15000);
 
@@ -118,13 +149,19 @@ export default async function handler(req, res) {
           }
 
           if (videoResp && videoResp.ok) {
-            const arrayBuffer = await videoResp.arrayBuffer();
-            const actualMB = arrayBuffer.byteLength / (1024 * 1024);
+            const videoBuffer = Buffer.from(await videoResp.arrayBuffer());
 
-            if (actualMB > 24) {
-              transcriptNote = `Video too large for transcript (${actualMB.toFixed(0)}MB). Analysis based on caption only.`;
-            } else {
-              const base64Audio = Buffer.from(arrayBuffer).toString('base64');
+            // Strip audio to a tiny mp3 with ffmpeg, then send that to Whisper.
+            // This avoids the 25MB video-size problem — the mp3 is only a few hundred KB.
+            let mp3Buffer;
+            try {
+              mp3Buffer = await extractAudioMp3(videoBuffer, v.video_id || Date.now());
+            } catch (ffErr) {
+              console.log(`ffmpeg failed for ${v.username}:`, ffErr.message);
+            }
+
+            if (mp3Buffer && mp3Buffer.length > 1000) {
+              const base64Audio = mp3Buffer.toString('base64');
               const whisperResp = await fetch('https://openrouter.ai/api/v1/audio/transcriptions', {
                 method: 'POST',
                 headers: {
@@ -133,7 +170,7 @@ export default async function handler(req, res) {
                 },
                 body: JSON.stringify({
                   model: 'openai/whisper-1',
-                  input_audio: { data: base64Audio, format: 'mp4' }
+                  input_audio: { data: base64Audio, format: 'mp3' }
                 })
               });
               const whisperData = await whisperResp.json();
@@ -144,6 +181,8 @@ export default async function handler(req, res) {
               } else {
                 transcriptNote = 'No speech detected in video. Analysis based on caption only.';
               }
+            } else {
+              transcriptNote = 'Could not extract audio. Analysis based on caption only.';
             }
           }
         } catch (e) {
