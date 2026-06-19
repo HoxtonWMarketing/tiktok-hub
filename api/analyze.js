@@ -74,6 +74,8 @@ export default async function handler(req, res) {
     // The search can return the videos under different keys depending on the
     // endpoint version — handle all of them.
     const videos = data.search_item_list || data.aweme_list || data.items || [];
+    const totalFound = videos.length; // how many the search returned (before filter)
+    console.log(`[FILTER] search returned ${totalFound} videos`);
 
     // Log how many ScrapeCreators credits are left after this search (visible in Vercel Logs)
     const creditsRemaining = (data.credits_remaining !== undefined && data.credits_remaining !== null) ? data.credits_remaining : 'unknown';
@@ -120,6 +122,8 @@ export default async function handler(req, res) {
         v.likes >= 2000 &&
         (v.posted_at === 0 || v.posted_at >= cutoff)
       );
+
+    console.log(`[FILTER] ${filtered.length} of ${totalFound} videos passed the filter`);
 
     // ── STEP 3: Whisper transcript + AI analysis ─────────
     const results = [];
@@ -285,6 +289,7 @@ Reply ONLY as a flat JSON object. Every value must be a plain string. No nested 
 
         results.push({
           ...v,
+          total_found:  totalFound,
           transcript:   transcriptNote,
           score:        parsed.score        || '5',
           topic:        parsed.topic        || 'Finance',
@@ -299,6 +304,7 @@ Reply ONLY as a flat JSON object. Every value must be a plain string. No nested 
         console.log(`AI failed for ${v.username}:`, e.message);
         results.push({
           ...v,
+          total_found:  totalFound,
           transcript:   transcriptNote,
           score:        '0',
           topic:        'Analysis failed',
