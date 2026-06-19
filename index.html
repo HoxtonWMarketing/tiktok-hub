@@ -131,9 +131,7 @@
 const WEEKLY_KEYWORDS = [
   'financial planning expat',
   'expat tax advice',
-  'international pension',
-  'offshore investment',
-  'expat wealth management'
+  'international pension'
 ];
 
 async function runWeeklyScan() {
@@ -152,7 +150,7 @@ async function runWeeklyScan() {
       const resp = await fetch('/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ keyword: kw, days: 7 }) // weekly = last 7 days only
+        body: JSON.stringify({ keyword: kw, days: 30 }) // weekly = last 30 days for more results
       });
       const videos = await resp.json();
       if (Array.isArray(videos)) allResults.push(...videos);
@@ -169,7 +167,7 @@ async function runWeeklyScan() {
 
   setLoading(false);
   saveLastScan();
-  renderCards(unique, `Weekly Scan — last 7 days`);
+  renderCards(unique, `Weekly Scan — last 30 days`);
 
   document.getElementById('weeklyBtn').disabled = false;
   document.getElementById('searchBtn').disabled = false;
@@ -246,8 +244,13 @@ function renderCards(videos, searchLabel) {
   }
 
   document.getElementById('resultsHeader').style.display = 'flex';
-  document.getElementById('resultsCount').textContent =
-    `${videos.length} video${videos.length !== 1 ? 's' : ''} found — ${searchLabel}`;
+  // Show counter: how many were returned by search vs how many passed the filter.
+  // total_found comes from the first video object if analyze.js provides it.
+  const totalFound = videos[0] && videos[0].total_found ? videos[0].total_found : null;
+  const counterText = totalFound
+    ? `${totalFound} videos found by search → ${videos.length} passed the filter — ${searchLabel}`
+    : `${videos.length} video${videos.length !== 1 ? 's' : ''} passed the filter — ${searchLabel}`;
+  document.getElementById('resultsCount').textContent = counterText;
 
   videos.forEach((v, i) => {
     const score      = Number(v.score) || 0;
