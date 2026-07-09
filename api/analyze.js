@@ -164,9 +164,9 @@ export default async function handler(req, res) {
             'Referer': 'https://www.tiktok.com/'
           };
 
-          // Download the video (15-second cap so a slow video can't eat the budget)
+          // Download the video (8-second cap so a slow video can't eat the budget)
           const dlController = new AbortController();
-          const dlTimeout = setTimeout(() => dlController.abort(), 15000);
+          const dlTimeout = setTimeout(() => dlController.abort(), 8000);
 
           let videoResp;
           try {
@@ -189,17 +189,26 @@ export default async function handler(req, res) {
 
             if (mp3Buffer && mp3Buffer.length > 1000) {
               const base64Audio = mp3Buffer.toString('base64');
-              const whisperResp = await fetch('https://openrouter.ai/api/v1/audio/transcriptions', {
-                method: 'POST',
-                headers: {
-                  'Authorization': `Bearer ${openrouterKey}`,
-                  'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                  model: 'openai/whisper-1',
-                  input_audio: { data: base64Audio, format: 'mp3' }
-                })
-              });
+              // 10-second cap on Whisper so a slow transcription can't hang the whole run
+              const wController = new AbortController();
+              const wTimeout = setTimeout(() => wController.abort(), 10000);
+              let whisperResp;
+              try {
+                whisperResp = await fetch('https://openrouter.ai/api/v1/audio/transcriptions', {
+                  method: 'POST',
+                  signal: wController.signal,
+                  headers: {
+                    'Authorization': `Bearer ${openrouterKey}`,
+                    'Content-Type': 'application/json'
+                  },
+                  body: JSON.stringify({
+                    model: 'openai/whisper-1',
+                    input_audio: { data: base64Audio, format: 'mp3' }
+                  })
+                });
+              } finally {
+                clearTimeout(wTimeout);
+              }
               const whisperData = await whisperResp.json();
               const text = whisperData.text || whisperData.transcript || '';
               if (text && text.length > 20) {
@@ -244,7 +253,7 @@ ${hasTranscript
 
 ── WHAT TO RETURN ──
 Reply ONLY as a flat JSON object. Every value must be a plain string. No nested objects. No arrays. No markdown.
-IMPORTANT: Keep every field short and punchy — 1 to 2 sentences maximum per field. Do not write long paragraphs. Fill in EVERY field completely; never leave one blank or trail off. Use exactly these keys:
+IMPORTANT: You MUST fill in EVERY field completely with useful detail — never leave one blank, never trail off. Aim for 2 clear, informative sentences per field (topic can be 1). Be specific and useful, but do not ramble into long paragraphs. Use exactly these keys:
 
 {
   "score": "<number 1-10 — how relevant is this for Hoxton Wealth expat audience>",
@@ -258,22 +267,29 @@ IMPORTANT: Keep every field short and punchy — 1 to 2 sentences maximum per fi
 
       // 3c. Send to Gemini via OpenRouter
       try {
-        const aiResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${openrouterKey}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            model: 'google/gemini-2.5-flash',
-            max_tokens: 2000,
-            temperature: 0.3, // lower = more concise, less rambling so it finishes every field
-            // Force the model to return strictly valid JSON — prevents the
-            // "Unterminated string in JSON" errors from line breaks/quotes in transcripts
-            response_format: { type: 'json_object' },
-            messages: [{ role: 'user', content: prompt }]
-          })
-        });
+        // 12-second cap on Gemini so a slow analysis can't hang the whole run
+        const gController = new AbortController();
+        const gTimeout = setTimeout(() => gController.abort(), 12000);
+        let aiResponse;
+        try {
+          aiResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST',
+            signal: gController.signal,
+            headers: {
+              'Authorization': `Bearer ${openrouterKey}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              model: 'google/gemini-2.5-flash',
+              max_tokens: 2000,
+              temperature: 0.4,
+              response_format: { type: 'json_object' },
+              messages: [{ role: 'user', content: prompt }]
+            })
+          });
+        } finally {
+          clearTimeout(gTimeout);
+        }
 
         const aiData  = await aiResponse.json();
         const rawText = aiData.choices?.[0]?.message?.content || '';
@@ -342,16 +358,24 @@ IMPORTANT: Keep every field short and punchy — 1 to 2 sentences maximum per fi
       }
     }
 
-    // Process up to 5 videos, but only 3 at a time (batching / concurrency limit).
-    // This keeps memory low and stops the 60s timeout, while still returning
-    // all the videos. Replaces the all-at-once Promise.all approach.
+    // Process up to 5 videos ALL AT ONCE (parallel). Each video has its own
+    // strict timeouts (8s download, 10s Whisper, 12s Gemini) so one slow video
+    // can't hang the others. Parallel = total time is the slowest single video.
     const toProcess = filtered.slice(0, 5);
-    const BATCH_SIZE = 3;
+
+    // Collect results as each video finishes, so a slow one doesn't lose the rest.
     const results = [];
-    for (let i = 0; i < toProcess.length; i += BATCH_SIZE) {
-      const batch = toProcess.slice(i, i + BATCH_SIZE);
-      const settled = await Promise.all(batch.map(v => processVideo(v)));
-      results.push(...settled.filter(Boolean));
+    const workers = toProcess.map(v =>
+      processVideo(v).then(r => { if (r) results.push(r); }).catch(() => {})
+    );
+
+    // GLOBAL SAFETY SWITCH: 50-second overall cap. If processing runs long, we
+    // stop waiting and return whatever finished — never hit Vercel's 60s limit.
+    const safety = new Promise(resolve => setTimeout(resolve, 50000));
+    await Promise.race([Promise.all(workers), safety]);
+
+    if (results.length === 0) {
+      console.log('[SAFETY] nothing finished in time');
     }
 
     results.sort((a, b) => Number(b.score) - Number(a.score));
