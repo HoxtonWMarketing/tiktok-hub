@@ -191,7 +191,7 @@ export default async function handler(req, res) {
               const base64Audio = mp3Buffer.toString('base64');
               // 10-second cap on Whisper so a slow transcription can't hang the whole run
               const wController = new AbortController();
-              const wTimeout = setTimeout(() => wController.abort(), 10000);
+              const wTimeout = setTimeout(() => wController.abort(), 12000);
               let whisperResp;
               try {
                 whisperResp = await fetch('https://openrouter.ai/api/v1/audio/transcriptions', {
@@ -278,7 +278,7 @@ IMPORTANT: You MUST fill in EVERY field completely with useful detail — never 
       try {
         // 12-second cap on Gemini so a slow analysis can't hang the whole run
         const gController = new AbortController();
-        const gTimeout = setTimeout(() => gController.abort(), 12000);
+        const gTimeout = setTimeout(() => gController.abort(), 15000);
         let aiResponse;
         try {
           aiResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
