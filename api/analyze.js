@@ -82,49 +82,73 @@ export default async function handler(req, res) {
     const creditsRemaining = (data.credits_remaining !== undefined && data.credits_remaining !== null) ? data.credits_remaining : 'unknown';
     console.log(`ScrapeCreators credits remaining after search: ${creditsRemaining}`);
 
-    // ── STEP 2: Filter — 100K+ views, 2K+ likes, recent ──
+    // ── STEP 2: Map raw data ──────────────────────────────
     const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
 
-    const filtered = videos
-      .map(item => {
-        // Some responses nest the data under aweme_info, others put it
-        // directly on the item. Support both so the filter always sees real numbers.
-        const info  = item.aweme_info || item;
-        const stats = info.statistics || {};
-        const video = info.video || {};
-        // create_time can be a number (seconds) or an ISO date string
-        let postedAt = 0;
-        if (info.create_time) {
-          postedAt = typeof info.create_time === 'number'
-            ? info.create_time * 1000
-            : new Date(info.create_time).getTime();
-        }
-        return {
-          author:    info.author?.nickname  || '',
-          username:  info.author?.unique_id || '',
-          video_id:  info.aweme_id          || '',
-          desc:      info.desc              || '',
-          views:     stats.play_count       || 0,
-          likes:     stats.digg_count       || 0,
-          comments:  stats.comment_count    || 0,
-          shares:    stats.share_count      || 0,
-          saves:     stats.collect_count    || 0,
-          url:       info.url               || '',
-          thumbnail: video.cover?.url_list?.[0] || '',
-          mp4_url:   video.play_addr?.url_list?.[0] || '',
-          posted_at: postedAt,
-          posted_label: postedAt
-            ? new Date(postedAt).toLocaleDateString('en-GB', { day:'numeric', month:'short', year:'numeric' })
-            : 'Unknown date',
-        };
-      })
-      .filter(v =>
-        v.views >= 50000 &&
-        v.likes >= 500 &&
+    const mappedVideos = videos.map(item => {
+      // Some responses nest the data under aweme_info, others put it
+      // directly on the item. Support both so the filter always sees real numbers.
+      const info  = item.aweme_info || item;
+      const stats = info.statistics || {};
+      const video = info.video || {};
+      // create_time can be a number (seconds) or an ISO date string
+      let postedAt = 0;
+      if (info.create_time) {
+        postedAt = typeof info.create_time === 'number'
+          ? info.create_time * 1000
+          : new Date(info.create_time).getTime();
+      }
+      return {
+        author:    info.author?.nickname  || '',
+        username:  info.author?.unique_id || '',
+        video_id:  info.aweme_id          || '',
+        desc:      info.desc              || '',
+        views:     stats.play_count       || 0,
+        likes:     stats.digg_count       || 0,
+        comments:  stats.comment_count    || 0,
+        shares:    stats.share_count      || 0,
+        saves:     stats.collect_count    || 0,
+        url:       info.url               || '',
+        thumbnail: video.cover?.url_list?.[0] || '',
+        mp4_url:   video.play_addr?.url_list?.[0] || '',
+        posted_at: postedAt,
+        posted_label: postedAt
+          ? new Date(postedAt).toLocaleDateString('en-GB', { day:'numeric', month:'short', year:'numeric' })
+          : 'Unknown date',
+      };
+    });
+
+    // ── STEP 2b: Tiered fallback filter ──────────────────
+    // Try the strict bar first. If fewer than 5 videos pass, automatically
+    // loosen the bar step by step until we have enough options. This keeps
+    // quality high on popular keywords but still returns results on narrow ones.
+    const filterTiers = [
+      { minViews: 50000, minLikes: 500 }, // Tier 1: best performers
+      { minViews: 20000, minLikes: 200 }, // Tier 2: mid-tier
+      { minViews: 5000,  minLikes: 50  }, // Tier 3: smaller niche content
+      { minViews: 0,     minLikes: 0   }, // Tier 4: anything matching the keyword
+    ];
+
+    let filtered = [];
+    let appliedTier = 0;
+    for (let i = 0; i < filterTiers.length; i++) {
+      const tier = filterTiers[i];
+      filtered = mappedVideos.filter(v =>
+        v.views >= tier.minViews &&
+        v.likes >= tier.minLikes &&
         (v.posted_at === 0 || v.posted_at >= cutoff)
       );
+      // Stop as soon as we have at least 5, or we've reached the loosest tier
+      if (filtered.length >= 5 || i === filterTiers.length - 1) {
+        appliedTier = i + 1;
+        break;
+      }
+    }
 
-    console.log(`[FILTER] ${filtered.length} of ${totalFound} videos passed the filter`);
+    // Sort best-first by views so the strongest videos are picked within the tier
+    filtered.sort((a, b) => b.views - a.views);
+
+    console.log(`[FILTER] Tier ${appliedTier} applied — ${filtered.length} of ${totalFound} videos passed`);
 
     // ── STEP 3: Whisper transcript + AI analysis (parallel, up to 8) ─────────
     async function processVideo(v) {
