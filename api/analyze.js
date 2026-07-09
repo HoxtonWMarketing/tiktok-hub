@@ -118,8 +118,8 @@ export default async function handler(req, res) {
         };
       })
       .filter(v =>
-        v.views >= 100000 &&
-        v.likes >= 2000 &&
+        v.views >= 50000 &&
+        v.likes >= 1000 &&
         (v.posted_at === 0 || v.posted_at >= cutoff)
       );
 
