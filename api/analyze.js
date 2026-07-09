@@ -228,10 +228,19 @@ export default async function handler(req, res) {
 
       const hasTranscript = transcript && transcript.length > 20;
 
-      // Trim long transcripts so the Gemini prompt stays a safe size
-      const transcriptForPrompt = hasTranscript
-        ? (transcript.length > 1500 ? transcript.slice(0, 1500) + '...' : transcript)
-        : '';
+      // Trim long transcripts using HEAD + TAIL so Gemini sees both the opening
+      // hook AND the ending (where creators put the takeaway / call-to-action).
+      // Short transcripts pass through whole; only long ones get head+tail.
+      let transcriptForPrompt = '';
+      if (hasTranscript) {
+        if (transcript.length <= 1500) {
+          transcriptForPrompt = transcript;
+        } else {
+          const head = transcript.slice(0, 800);
+          const tail = transcript.slice(-600);
+          transcriptForPrompt = head + ' ... [middle skipped] ... ' + tail;
+        }
+      }
 
       // 3b. AI prompt — analysis + draft script
       const prompt = `You are a senior content strategist for Hoxton Wealth, a financial planning firm for expats — professionals living outside their home country with complex cross-border financial needs (tax, pensions, investments, currency, inheritance).
