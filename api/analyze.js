@@ -13,7 +13,8 @@
 //
 // COST: 1 ScrapeCreators credit per search. Transcripts cost 0 ScrapeCreators credits.
 //
-// FIXES: 3 videos (not 5) to avoid timeout. Forces valid JSON from Gemini.
+// Shows up to 8 videos, processed IN PARALLEL so they finish within 60s.
+// Forces valid JSON from Gemini.
 // Repairs JSON if it still breaks. Skips oversized videos with a note.
 // ============================================================
 
@@ -125,10 +126,8 @@ export default async function handler(req, res) {
 
     console.log(`[FILTER] ${filtered.length} of ${totalFound} videos passed the filter`);
 
-    // ── STEP 3: Whisper transcript + AI analysis ─────────
-    const results = [];
-
-    for (const v of filtered.slice(0, 3)) {
+    // ── STEP 3: Whisper transcript + AI analysis (parallel, up to 8) ─────────
+    async function processVideo(v) {
 
       // 3a. Try to transcribe with Whisper
       let transcript     = '';
@@ -287,7 +286,7 @@ Reply ONLY as a flat JSON object. Every value must be a plain string. No nested 
           }
         }
 
-        results.push({
+        return {
           ...v,
           total_found:  totalFound,
           transcript:   transcriptNote,
@@ -298,11 +297,11 @@ Reply ONLY as a flat JSON object. Every value must be a plain string. No nested 
           what_they_say: parsed.what_they_say || transcriptNote,
           draft_script: parsed.draft_script || 'Could not generate',
           summary:      parsed.summary      || 'Analysis unavailable',
-        });
+        };
 
       } catch (e) {
         console.log(`AI failed for ${v.username}:`, e.message);
-        results.push({
+        return {
           ...v,
           total_found:  totalFound,
           transcript:   transcriptNote,
@@ -313,9 +312,14 @@ Reply ONLY as a flat JSON object. Every value must be a plain string. No nested 
           what_they_say: transcriptNote,
           draft_script: 'Could not generate',
           summary:      'AI analysis failed — check OpenRouter key or try again',
-        });
+        };
       }
     }
+
+    // Process up to 8 videos in PARALLEL (all at once) so they finish within
+    // the 60s limit. Running them one-by-one would time out at 8 videos.
+    const settled = await Promise.all(filtered.slice(0, 8).map(v => processVideo(v)));
+    const results = settled.filter(Boolean);
 
     results.sort((a, b) => Number(b.score) - Number(a.score));
     res.status(200).json(results);
