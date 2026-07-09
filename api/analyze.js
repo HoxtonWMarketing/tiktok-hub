@@ -221,7 +221,7 @@ export default async function handler(req, res) {
 
       // Trim long transcripts so the Gemini prompt stays a safe size
       const transcriptForPrompt = hasTranscript
-        ? (transcript.length > 2000 ? transcript.slice(0, 2000) + '...' : transcript)
+        ? (transcript.length > 1500 ? transcript.slice(0, 1500) + '...' : transcript)
         : '';
 
       // 3b. AI prompt — analysis + draft script
@@ -243,7 +243,8 @@ ${hasTranscript
 }
 
 ── WHAT TO RETURN ──
-Reply ONLY as a flat JSON object. Every value must be a plain string. No nested objects. No arrays. No markdown. Use exactly these keys:
+Reply ONLY as a flat JSON object. Every value must be a plain string. No nested objects. No arrays. No markdown.
+IMPORTANT: Keep every field short and punchy — 1 to 2 sentences maximum per field. Do not write long paragraphs. Fill in EVERY field completely; never leave one blank or trail off. Use exactly these keys:
 
 {
   "score": "<number 1-10 — how relevant is this for Hoxton Wealth expat audience>",
@@ -266,6 +267,7 @@ Reply ONLY as a flat JSON object. Every value must be a plain string. No nested 
           body: JSON.stringify({
             model: 'google/gemini-2.5-flash',
             max_tokens: 2000,
+            temperature: 0.3, // lower = more concise, less rambling so it finishes every field
             // Force the model to return strictly valid JSON — prevents the
             // "Unterminated string in JSON" errors from line breaks/quotes in transcripts
             response_format: { type: 'json_object' },
