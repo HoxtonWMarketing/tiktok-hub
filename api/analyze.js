@@ -13,7 +13,8 @@
 //
 // COST: 1 ScrapeCreators credit per search. Transcripts cost 0 ScrapeCreators credits.
 //
-// FIXES: 3 videos (not 5) to avoid timeout. Forces valid JSON from Gemini.
+// Shows up to 5 videos, processed 3 at a time (batching) to avoid timeouts
+// and keep memory low. Forces valid JSON from Gemini.
 // Repairs JSON if it still breaks. Skips oversized videos with a note.
 // ============================================================
 
@@ -118,17 +119,15 @@ export default async function handler(req, res) {
         };
       })
       .filter(v =>
-        v.views >= 100000 &&
-        v.likes >= 2000 &&
+        v.views >= 50000 &&
+        v.likes >= 500 &&
         (v.posted_at === 0 || v.posted_at >= cutoff)
       );
 
     console.log(`[FILTER] ${filtered.length} of ${totalFound} videos passed the filter`);
 
-    // ── STEP 3: Whisper transcript + AI analysis ─────────
-    const results = [];
-
-    for (const v of filtered.slice(0, 3)) {
+    // ── STEP 3: Whisper transcript + AI analysis (parallel, up to 8) ─────────
+    async function processVideo(v) {
 
       // 3a. Try to transcribe with Whisper
       let transcript     = '';
@@ -287,7 +286,7 @@ Reply ONLY as a flat JSON object. Every value must be a plain string. No nested 
           }
         }
 
-        results.push({
+        return {
           ...v,
           total_found:  totalFound,
           transcript:   transcriptNote,
@@ -298,11 +297,11 @@ Reply ONLY as a flat JSON object. Every value must be a plain string. No nested 
           what_they_say: parsed.what_they_say || transcriptNote,
           draft_script: parsed.draft_script || 'Could not generate',
           summary:      parsed.summary      || 'Analysis unavailable',
-        });
+        };
 
       } catch (e) {
         console.log(`AI failed for ${v.username}:`, e.message);
-        results.push({
+        return {
           ...v,
           total_found:  totalFound,
           transcript:   transcriptNote,
@@ -313,8 +312,20 @@ Reply ONLY as a flat JSON object. Every value must be a plain string. No nested 
           what_they_say: transcriptNote,
           draft_script: 'Could not generate',
           summary:      'AI analysis failed — check OpenRouter key or try again',
-        });
+        };
       }
+    }
+
+    // Process up to 5 videos, but only 3 at a time (batching / concurrency limit).
+    // This keeps memory low and stops the 60s timeout, while still returning
+    // all the videos. Replaces the all-at-once Promise.all approach.
+    const toProcess = filtered.slice(0, 5);
+    const BATCH_SIZE = 3;
+    const results = [];
+    for (let i = 0; i < toProcess.length; i += BATCH_SIZE) {
+      const batch = toProcess.slice(i, i + BATCH_SIZE);
+      const settled = await Promise.all(batch.map(v => processVideo(v)));
+      results.push(...settled.filter(Boolean));
     }
 
     results.sort((a, b) => Number(b.score) - Number(a.score));
